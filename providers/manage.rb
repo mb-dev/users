@@ -53,9 +53,9 @@ action :create do
   if Chef::Config[:solo] and not chef_solo_search_installed?
     Chef::Log.warn("This recipe uses search. Chef Solo does not support search unless you install the chef-solo-search cookbook.")
   else
-    search(new_resource.data_bag, "groups:#{new_resource.search_group} AND NOT action:remove") do |u|
-      u['username'] ||= u['id']
-      security_group << u['username']
+    search(new_resource.data_bag, "id:#{new_resource.search_group} AND NOT action:remove") do |u|
+      username = u['username'] || u['id']
+      security_group << username
 
       if node['apache'] and node['apache']['allowed_openids']
         Array(u['openid']).compact.each do |oid|
@@ -68,21 +68,21 @@ action :create do
       if u['home']
         home_dir = u['home']
       else
-        home_dir = "/home/#{u['username']}"
+        home_dir = "/home/#{username}"
       end
 
       # The user block will fail if the group does not yet exist.
       # See the -g option limitations in man 8 useradd for an explanation.
       # This should correct that without breaking functionality.
       if u['gid'] and u['gid'].kind_of?(Numeric)
-        group u['username'] do
+        group username do
           gid u['gid']
         end
       end
 
       # Create user object.
       # Do NOT try to manage null home directories.
-      user u['username'] do
+      user username do
         uid u['uid']
         if u['gid']
           gid u['gid']
@@ -100,8 +100,8 @@ action :create do
 
       if home_dir != "/dev/null"
         directory "#{home_dir}/.ssh" do
-          owner u['username']
-          group u['gid'] || u['username']
+          owner username
+          group u['gid'] || username
           mode "0700"
         end
 
@@ -109,25 +109,13 @@ action :create do
           template "#{home_dir}/.ssh/authorized_keys" do
             source "authorized_keys.erb"
             cookbook new_resource.cookbook
-            owner u['username']
-            group u['gid'] || u['username']
+            owner username
+            group u['gid'] || username
             mode "0600"
             variables :ssh_keys => u['ssh_keys']
           end
         end
-
-        if u['ssh_private_key']
-          key_type = u['ssh_private_key'].include?("BEGIN RSA PRIVATE KEY") ? "rsa" : "dsa"
-          template "#{home_dir}/.ssh/id_#{key_type}" do
-            source "private_key.erb"
-            cookbook new_resource.cookbook
-            owner u['id']
-            group u['gid'] || u['id']
-            mode "0400"
-            variables :private_key => u['ssh_private_key']
-          end
-        end
-
+        
         if u['ssh_public_key']
           key_type = u['ssh_public_key'].include?("ssh-rsa") ? "rsa" : "dsa"
           template "#{home_dir}/.ssh/id_#{key_type}.pub" do
@@ -137,6 +125,18 @@ action :create do
             group u['gid'] || u['id']
             mode "0400"
             variables :public_key => u['ssh_public_key']
+          end
+        end
+        
+        if u['ssh_private_key']
+          key_type = key_type || "rsa"
+          template "#{home_dir}/.ssh/id_#{key_type}" do
+            source "private_key.erb"
+            cookbook new_resource.cookbook
+            owner u['id']
+            group u['gid'] || u['id']
+            mode "0400"
+            variables :private_key => u['ssh_private_key']
           end
         end
       end
